@@ -23,7 +23,7 @@ import os
 
 
 # Experience tuple for replay buffer
-Experience = namedtuple('Experience', ['state', 'action', 'reward', 'next_state', 'done'])
+Experience = namedtuple('Experience', ['state', 'action', 'reward', 'next_state', 'done', 'next_valid_actions'])
 
 
 class QNetwork(nn.Module):
@@ -75,9 +75,9 @@ class ReplayBuffer:
         self.buffer = deque(maxlen=capacity)
     
     def push(self, state: np.ndarray, action: int, reward: float, 
-             next_state: np.ndarray, done: bool):
+             next_state: np.ndarray, done: bool, next_valid_actions: List[int]):
         """Add an experience to the buffer."""
-        self.buffer.append(Experience(state, action, reward, next_state, done))
+        self.buffer.append(Experience(state, action, reward, next_state, done, next_valid_actions))
     
     def sample(self, batch_size: int) -> List[Experience]:
         """Sample a batch of experiences."""
@@ -179,9 +179,14 @@ class DQNAgent:
         features = np.array([
             state['current_idx'] / self.n_nodes,  # Normalize
             state['goal_idx'] / self.n_nodes,
-            state['distance_to_goal'],
-            state['steps'] / 500.0,  # Normalize by max steps
-            state['visited_count'] / 100.0,  # Normalize
+            # Use pre-normalized features from environment
+            state['norm_dist'],
+            state['steps'] / 500.0,
+            state['visited_count'] / 100.0,
+            state['norm_current_lat'],
+            state['norm_current_lon'],
+            state['norm_goal_lat'],
+            state['norm_goal_lon'],
         ], dtype=np.float32)
         
         return torch.FloatTensor(features).to(self.device)
@@ -235,11 +240,11 @@ class DQNAgent:
                 return best_action
     
     def store_experience(self, state: Dict[str, Any], action: int, reward: float,
-                        next_state: Dict[str, Any], done: bool):
+                        next_state: Dict[str, Any], done: bool, next_valid_actions: List[int]):
         """Store experience in replay buffer. Action should be node index."""
         state_tensor = self.state_to_tensor(state).cpu().numpy()
         next_state_tensor = self.state_to_tensor(next_state).cpu().numpy()
-        self.replay_buffer.push(state_tensor, action, reward, next_state_tensor, done)
+        self.replay_buffer.push(state_tensor, action, reward, next_state_tensor, done, next_valid_actions)
     
     def train_step(self) -> float:
         """
@@ -266,7 +271,29 @@ class DQNAgent:
         
         # Target Q-values
         with torch.no_grad():
-            next_q_values = self.target_network(next_states).max(1)[0]
+            # Compute Q-values for next states
+            all_next_q_values = self.target_network(next_states)
+            
+            # Mask invalid actions for each experience in the batch
+            # efficient batched max with masking
+            next_q_values = []
+            for i, experience in enumerate(experiences):
+                valid_actions = experience.next_valid_actions
+                # Mask: set invalid actions to -inf
+                q_vals = all_next_q_values[i].clone()
+                mask = torch.ones_like(q_vals) * float('-inf')
+                
+                # Careful handling of valid_actions list
+                if valid_actions:
+                    mask[valid_actions] = 0
+                    masked_q = q_vals + mask
+                    max_q = masked_q.max().item()
+                else:
+                    max_q = 0.0 # No valid moves? Should imply done, but just in case
+                
+                next_q_values.append(max_q)
+            
+            next_q_values = torch.FloatTensor(next_q_values).to(self.device)
             target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
         
         # Compute loss

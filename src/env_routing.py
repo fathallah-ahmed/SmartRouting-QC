@@ -8,6 +8,23 @@ The agent navigates through the Quebec City road network to find optimal paths.
 import networkx as nx
 import numpy as np
 from typing import Tuple, List, Dict, Any, Optional
+from math import radians, cos, sin, asin, sqrt
+
+def haversine_distance(lon1, lat1, lon2, lat2):
+    """
+    Calculate the great circle distance between two points 
+    on the earth (specified in decimal degrees)
+    """
+    # Convert decimal degrees to radians 
+    lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+
+    # Haversine formula 
+    dlon = lon2 - lon1 
+    dlat = lat2 - lat1 
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a)) 
+    r = 6371000 # Radius of earth in meters
+    return c * r
 
 
 class RoutingEnv:
@@ -44,11 +61,19 @@ class RoutingEnv:
         self.total_cost = 0.0
         self.steps = 0
         
-        # Precompute node positions for distance calculations
         self.node_positions = {
             node: (data['y'], data['x']) 
             for node, data in graph.nodes(data=True)
         }
+        
+        # Precompute bounds for normalization
+        lats = [pos[0] for pos in self.node_positions.values()]
+        lons = [pos[1] for pos in self.node_positions.values()]
+        self.min_lat, self.max_lat = min(lats), max(lats)
+        self.min_lon, self.max_lon = min(lons), max(lons)
+        self.lat_range = max(1e-6, self.max_lat - self.min_lat)
+        self.lon_range = max(1e-6, self.max_lon - self.min_lon)
+        self.max_dist = 25000.0  # Approx max distance in meters based on stats
         
     def reset(self, start: int, goal: int) -> Dict[str, Any]:
         """
@@ -89,10 +114,10 @@ class RoutingEnv:
         current_pos = self.node_positions[self.current_node]
         goal_pos = self.node_positions[self.goal_node]
         
-        # Simple Euclidean distance (approximation)
-        distance_to_goal = np.sqrt(
-            (current_pos[0] - goal_pos[0])**2 + 
-            (current_pos[1] - goal_pos[1])**2
+        # Calculate Haversine distance (meters)
+        distance_to_goal = haversine_distance(
+            current_pos[0], current_pos[1],
+            goal_pos[0], goal_pos[1]
         )
         
         return {
@@ -103,6 +128,12 @@ class RoutingEnv:
             'distance_to_goal': distance_to_goal,
             'steps': self.steps,
             'visited_count': len(self.visited_nodes),
+            # Normalize inputs to [0, 1] range
+            'norm_dist': distance_to_goal / self.max_dist,
+            'norm_current_lat': (current_pos[0] - self.min_lat) / self.lat_range,
+            'norm_current_lon': (current_pos[1] - self.min_lon) / self.lon_range,
+            'norm_goal_lat': (goal_pos[0] - self.min_lat) / self.lat_range,
+            'norm_goal_lon': (goal_pos[1] - self.min_lon) / self.lon_range,
         }
     
     def get_available_actions(self) -> List[int]:
@@ -205,30 +236,30 @@ class RoutingEnv:
                          action: int,
                          prev_node: int) -> float:
         """
-        Calculate reward for the current step.
+        Simplified reward function focusing on progress.
         
-        Reward components:
-        - Negative edge cost (lower cost = higher reward)
-        - Progress bonus (moving closer to goal)
-        - Loop penalty (revisiting nodes)
-        - Goal bonus (reaching the goal)
+        Components:
+        - Tiny edge cost (don't punish exploration)
+        - Strong progress reward (main learning signal)
+        - Small loop penalty (discourage circles)
+        - Huge goal reward (make success valuable)
         """
-        # Base reward: negative of edge cost (scaled)
-        reward = -edge_cost * 10.0
+        # Almost no edge cost - encourage exploration
+        reward = -edge_cost * 0.1
         
-        # Progress reward: bonus for getting closer to goal
+        # Progress is the PRIMARY signal
         progress = prev_distance - new_distance
-        reward += progress * 50.0  # Scale progress reward
         
-        # Loop penalty: penalize revisiting nodes
+        # Strong scaling: 1km progress = +1000 reward
+        reward += progress * 1.0
+        
+        # Small loop penalty
         if action in self.visited_nodes and action != self.goal_node:
             reward -= 5.0
         
-        # Goal bonus: large reward for reaching goal
+        # MASSIVE goal reward (simple, no complexity)
         if action == self.goal_node:
-            reward += 100.0
-            # Additional bonus for shorter paths
-            reward += max(0, 50.0 - self.steps * 0.5)
+            reward += 15000.0
         
         return reward
     

@@ -46,8 +46,11 @@ def train_episode(env: RoutingEnv, agent: DQNAgent, start: int, goal: int,
         # Take step
         next_state, reward, done, info = env.step(action)
         
+        # Get valid actions for next state
+        next_valid_actions = env.get_available_actions()
+        
         # Store experience
-        agent.store_experience(state, action, reward, next_state, done)
+        agent.store_experience(state, action, reward, next_state, done, next_valid_actions)
         
         # Train
         loss = agent.train_step()
@@ -121,7 +124,7 @@ def train(args):
     
     agent = DQNAgent(
         n_nodes=len(G.nodes()),
-        state_dim=5,
+        state_dim=9, # Added 4 coordinate features
         hidden_dim=args.hidden_dim,
         learning_rate=args.learning_rate,
         gamma=args.gamma,
@@ -131,6 +134,7 @@ def train(args):
         buffer_capacity=args.buffer_capacity,
         batch_size=args.batch_size,
         target_update_freq=args.target_update_freq,
+        device=args.device,
     )
     
     # Training metrics
@@ -303,22 +307,24 @@ if __name__ == "__main__":
                        help='Maximum steps per episode')
     parser.add_argument('--hidden-dim', type=int, default=256,
                        help='Hidden layer dimension')
-    parser.add_argument('--learning-rate', type=float, default=0.001,
-                       help='Learning rate')
-    parser.add_argument('--gamma', type=float, default=0.95,
-                       help='Discount factor')
+    parser.add_argument('--learning-rate', type=float, default=0.0005,
+                       help='Learning rate (default: 0.0005)')
+    parser.add_argument('--gamma', type=float, default=0.99,
+                       help='Discount factor (default: 0.99)')
     parser.add_argument('--epsilon-start', type=float, default=1.0,
                        help='Initial exploration rate')
     parser.add_argument('--epsilon-end', type=float, default=0.01,
                        help='Final exploration rate')
-    parser.add_argument('--epsilon-decay', type=float, default=0.995,
-                       help='Exploration decay rate')
-    parser.add_argument('--buffer-capacity', type=int, default=10000,
-                       help='Replay buffer capacity')
+    parser.add_argument('--epsilon-decay', type=float, default=0.9995,
+                       help='Exploration decay rate (default: 0.9995 for slow decay)')
+    parser.add_argument('--buffer-capacity', type=int, default=50000,
+                       help='Replay buffer capacity (default: 50000)')
     parser.add_argument('--batch-size', type=int, default=64,
                        help='Training batch size')
     parser.add_argument('--target-update-freq', type=int, default=10,
-                       help='Target network update frequency (episodes)')
+                       help='Target network update frequency (episodes) (default: 10)')
+    parser.add_argument('--device', type=str, default=None,
+                       help='Device to use (cuda/cpu)')
     
     # Output parameters
     parser.add_argument('--model-dir', type=str, default='models',
