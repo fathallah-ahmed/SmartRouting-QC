@@ -257,6 +257,79 @@ def get_random_node_pairs(G: nx.MultiDiGraph,
     return pairs
 
 
+def create_small_graph(G: nx.MultiDiGraph, 
+                       n_nodes: int = 500,
+                       center_node: int = None,
+                       seed: int = 42) -> nx.MultiDiGraph:
+    """
+    Create a smaller connected subgraph using BFS expansion.
+    
+    This ensures the subgraph stays connected by growing outward from
+    a starting node using breadth-first search.
+    
+    Args:
+        G: Full road network graph
+        n_nodes: Target number of nodes in the subgraph
+        center_node: Optional starting node (random if None)
+        seed: Random seed for reproducibility
+        
+    Returns:
+        Smaller connected subgraph
+    """
+    np.random.seed(seed)
+    
+    print(f"Creating subgraph with ~{n_nodes} nodes...")
+    
+    # Get the largest weakly connected component first
+    largest_cc = max(nx.weakly_connected_components(G), key=len)
+    G_connected = G.subgraph(largest_cc)
+    
+    print(f"Largest connected component has {len(G_connected.nodes)} nodes")
+    
+    # If requesting more nodes than available, use all
+    if n_nodes >= len(G_connected.nodes):
+        print(f"Using entire connected component ({len(G_connected.nodes)} nodes)")
+        return G_connected.copy()
+    
+    # Pick random starting node
+    if center_node is None or center_node not in G_connected:
+        center_node = np.random.choice(list(G_connected.nodes()))
+    
+    # BFS expansion to maintain connectivity
+    subgraph_nodes = set([center_node])
+    frontier = set([center_node])
+    
+    while len(subgraph_nodes) < n_nodes and frontier:
+        # Get all neighbors of current frontier
+        new_frontier = set()
+        for node in frontier:
+            # Add neighbors (both incoming and outgoing for directed graph)
+            for neighbor in G_connected.successors(node):
+                if neighbor not in subgraph_nodes:
+                    new_frontier.add(neighbor)
+            for neighbor in G_connected.predecessors(node):
+                if neighbor not in subgraph_nodes:
+                    new_frontier.add(neighbor)
+        
+        # If we would exceed target, sample from new frontier
+        if len(subgraph_nodes) + len(new_frontier) > n_nodes:
+            remaining = n_nodes - len(subgraph_nodes)
+            new_frontier = set(np.random.choice(list(new_frontier), 
+                                               size=remaining, 
+                                               replace=False))
+        
+        # Add new frontier to subgraph
+        subgraph_nodes.update(new_frontier)
+        frontier = new_frontier
+    
+    # Create the subgraph
+    subgraph = G.subgraph(subgraph_nodes).copy()
+    
+    print(f"Created subgraph with {len(subgraph.nodes)} nodes and {len(subgraph.edges)} edges")
+    
+    return subgraph
+
+
 def split_train_test(pairs: List[Tuple[int, int]], 
                      test_ratio: float = 0.2,
                      seed: int = 42) -> Tuple[List[Tuple[int, int]], List[Tuple[int, int]]]:

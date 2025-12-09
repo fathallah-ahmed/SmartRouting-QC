@@ -1,0 +1,8 @@
+{
+  "total_test_pairs": 40,
+  "rl_success_count": 0,
+  "rl_success_rate": 0.0,
+  "dijkstra_success_count": 40,
+  "dijkstra_success_rate": 1.0,
+  "both_success_count": 0
+}

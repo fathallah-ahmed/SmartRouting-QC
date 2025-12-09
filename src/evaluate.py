@@ -13,7 +13,7 @@ import pandas as pd
 from tqdm import tqdm
 from typing import List, Tuple, Dict
 
-from data_loader import load_quebec_graph, preprocess_graph
+from data_loader import load_quebec_graph, preprocess_graph, create_small_graph
 from env_routing import RoutingEnv
 from agent_rl import DQNAgent
 from baseline import dijkstra_path, compute_path_metrics
@@ -66,6 +66,12 @@ def evaluate(args):
     # Load graph
     print("\n1. Loading Quebec City road network...")
     G = load_quebec_graph(cache_path=args.graph_cache)
+    
+    # Create small graph if requested
+    if args.use_small_graph:
+        print(f"Creating {args.small_graph_nodes}-node subgraph...")
+        G = create_small_graph(G, n_nodes=args.small_graph_nodes, seed=args.seed)
+    
     G = preprocess_graph(G,
                         distance_weight=args.distance_weight,
                         time_weight=args.time_weight,
@@ -85,10 +91,20 @@ def evaluate(args):
     
     # Load trained agent
     print("\n3. Loading trained DQN agent...")
+    
+    # Load checkpoint to get model configuration
+    import torch
+    checkpoint = torch.load(args.model_path, map_location='cpu')
+    state_dim = checkpoint.get('state_dim', 9)  # Default to 9 if not saved
+    n_nodes = checkpoint.get('n_nodes', len(G.nodes()))
+    
+    print(f"   Model trained with state_dim={state_dim}, n_nodes={n_nodes}")
+    
     agent = DQNAgent(
-        n_nodes=len(G.nodes()),
-        state_dim=5,
+        n_nodes=n_nodes,
+        state_dim=state_dim,
         hidden_dim=args.hidden_dim,
+        device=args.device,
     )
     agent.load_model(args.model_path)
     
@@ -198,6 +214,18 @@ def evaluate(args):
             'dijkstra_avg_cost': both_success['dijkstra_cost'].mean(),
         })
     
+    # Convert numpy types to native python types for JSON serialization
+    def convert_to_native(obj):
+        if isinstance(obj, (np.int64, np.int32)):
+            return int(obj)
+        if isinstance(obj, (np.float64, np.float32)):
+            return float(obj)
+        if isinstance(obj, dict):
+            return {k: convert_to_native(v) for k, v in obj.items()}
+        return obj
+
+    summary = convert_to_native(summary)
+
     # Save summary
     summary_path = args.output.replace('.csv', '_summary.json')
     with open(summary_path, 'w') as f:
@@ -246,6 +274,12 @@ if __name__ == "__main__":
                        help='Path to cached graph file')
     parser.add_argument('--log-dir', type=str, default='results/logs',
                        help='Directory containing train/test splits')
+    parser.add_argument('--use-small-graph', action='store_true', default=False,
+                       help='Use a subgraph for evaluation')
+    parser.add_argument('--small-graph-nodes', type=int, default=200,
+                       help='Number of nodes in subgraph')
+    parser.add_argument('--seed', type=int, default=42,
+                       help='Random seed for graph sampling')
     
     # Cost weights (should match training)
     parser.add_argument('--distance-weight', type=float, default=0.4,
@@ -262,6 +296,8 @@ if __name__ == "__main__":
                        help='Hidden layer dimension (must match training)')
     parser.add_argument('--max-steps', type=int, default=500,
                        help='Maximum steps per episode')
+    parser.add_argument('--device', type=str, default=None,
+                       help='Device to use (cuda/cpu)')
     
     # Output parameters
     parser.add_argument('--output', type=str, default='results/evaluation_results.csv',

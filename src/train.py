@@ -13,7 +13,7 @@ from tqdm import tqdm
 from typing import List, Tuple, Dict
 import matplotlib.pyplot as plt
 
-from data_loader import load_quebec_graph, preprocess_graph, get_random_node_pairs, split_train_test
+from data_loader import load_quebec_graph, preprocess_graph, get_random_node_pairs, split_train_test, create_small_graph
 from env_routing import RoutingEnv
 from agent_rl import DQNAgent
 
@@ -92,6 +92,11 @@ def train(args):
     # Load and preprocess graph
     print("\n1. Loading Quebec City road network...")
     G = load_quebec_graph(cache_path=args.graph_cache)
+    
+    # Create subgraph (default: 10,000 nodes for optimal performance)
+    if args.use_small_graph:
+        G = create_small_graph(G, n_nodes=args.small_graph_nodes, seed=args.seed)
+    
     G = preprocess_graph(G, 
                         distance_weight=args.distance_weight,
                         time_weight=args.time_weight,
@@ -281,6 +286,10 @@ if __name__ == "__main__":
     # Data parameters
     parser.add_argument('--graph-cache', type=str, default='data/quebec_graph.pkl',
                        help='Path to cached graph file')
+    parser.add_argument('--use-small-graph', action='store_true', default=True,
+                       help='Use a subgraph for training (default: 5,000 nodes for better learning)')
+    parser.add_argument('--small-graph-nodes', type=int, default=5000,
+                       help='Number of nodes in subgraph (default: 5,000)')
     parser.add_argument('--n-pairs', type=int, default=200,
                        help='Number of node pairs to generate')
     parser.add_argument('--min-distance', type=float, default=1000,
@@ -293,11 +302,11 @@ if __name__ == "__main__":
                        help='Random seed')
     
     # Cost weights
-    parser.add_argument('--distance-weight', type=float, default=0.4,
+    parser.add_argument('--distance-weight', type=float, default=1,
                        help='Weight for distance in cost function')
-    parser.add_argument('--time-weight', type=float, default=0.4,
+    parser.add_argument('--time-weight', type=float, default=0,
                        help='Weight for time in cost function')
-    parser.add_argument('--quality-weight', type=float, default=0.2,
+    parser.add_argument('--quality-weight', type=float, default=0,
                        help='Weight for road quality in cost function')
     
     # Training parameters
@@ -307,16 +316,16 @@ if __name__ == "__main__":
                        help='Maximum steps per episode')
     parser.add_argument('--hidden-dim', type=int, default=256,
                        help='Hidden layer dimension')
-    parser.add_argument('--learning-rate', type=float, default=0.0005,
-                       help='Learning rate (default: 0.0005)')
+    parser.add_argument('--learning-rate', type=float, default=0.00005,
+                       help='Learning rate (default: 0.00005 - very conservative for stability)')
     parser.add_argument('--gamma', type=float, default=0.99,
                        help='Discount factor (default: 0.99)')
     parser.add_argument('--epsilon-start', type=float, default=1.0,
                        help='Initial exploration rate')
     parser.add_argument('--epsilon-end', type=float, default=0.01,
                        help='Final exploration rate')
-    parser.add_argument('--epsilon-decay', type=float, default=0.9995,
-                       help='Exploration decay rate (default: 0.9995 for slow decay)')
+    parser.add_argument('--epsilon-decay', type=float, default=0.9997,
+                       help='Exploration decay rate (default: 0.9997 for slower decay)')
     parser.add_argument('--buffer-capacity', type=int, default=50000,
                        help='Replay buffer capacity (default: 50000)')
     parser.add_argument('--batch-size', type=int, default=64,

@@ -236,30 +236,44 @@ class RoutingEnv:
                          action: int,
                          prev_node: int) -> float:
         """
-        Simplified reward function focusing on progress.
+        Balanced reward function with moderate progress signals.
         
         Components:
-        - Tiny edge cost (don't punish exploration)
-        - Strong progress reward (main learning signal)
-        - Small loop penalty (discourage circles)
-        - Huge goal reward (make success valuable)
+        - Distance-based progress (strong but not explosive)
+        - Goal proximity bonus (incremental rewards)
+        - Small edge cost penalty
+        - Reduced loop penalty
+        - Large goal reward
         """
-        # Almost no edge cost - encourage exploration
-        reward = -edge_cost * 0.1
-        
-        # Progress is the PRIMARY signal
+        # Calculate progress (main signal)
         progress = prev_distance - new_distance
         
-        # Strong scaling: 1km progress = +1000 reward
-        reward += progress * 1.0
+        # Strong but controlled progress reward
+        # Scale: 100 meters closer = +10 reward
+        reward = progress * 10.0
         
-        # Small loop penalty
+        # Small edge cost to prefer shorter paths
+        reward -= edge_cost * 0.05
+        
+        # Proximity bonus: give incremental rewards for being close to goal
+        # This helps the agent learn even when not reaching the goal
+        if new_distance < 1000:  # Within 1km
+            reward += 10.0
+        elif new_distance < 2000:  # Within 2km  
+            reward += 5.0
+        elif new_distance < 3000:  # Within 3km
+            reward += 2.0
+        
+        # Very small loop penalty (don't discourage exploration too much)
         if action in self.visited_nodes and action != self.goal_node:
-            reward -= 5.0
+            reward -= 2.0
         
-        # MASSIVE goal reward (simple, no complexity)
+        # Large goal reward - make reaching goal valuable
         if action == self.goal_node:
-            reward += 15000.0
+            reward += 1000.0
+            # Bonus for reaching goal quickly
+            if self.steps < 100:
+                reward += 200.0
         
         return reward
     
